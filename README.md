@@ -9,7 +9,7 @@ The inline parse transform looks for 'inline_module' directive to know what
 modules to include like
 
     -inline_module([a,b,c]).
-    -inline_modue(d).
+    -inline_module(d).
 
 The modules included must priorly have been compiled to beam files and also be found in the code path. The inlined modules MUST also have been compiled with +debug_info enabled, this is how the inliner finds the code to inline.
 If any of the above condition is not met, an error is generated.
@@ -44,11 +44,12 @@ run() ->
     vec3f:multiply(A,vec3f:add(B,C)).
 ```
 
-The code above create three 3D vectors A, B and C. In normal Erlang the above code would call new three times then call vec3f:add and lastly vec3f:multiply  but when compiled with the
+The code above creates three 3D vectors A, B and C. Normally the above code would call vec3f:new three times then call vec3f:add and lastly call vec3f:multiply, but when compiled with the compile option
 
     -compile({inline_size,100}).
 
-option the code is simply reduced to the result of the calculation!
+the code is simply reduced to the result of the calculation!
+
 Checking the beam assembler output by setting the -S option to erlc we
 can verify this
 
@@ -64,12 +65,8 @@ can verify this
 
 In otherwords to get constant propagation and other cool things to
 happend in the erlang compiler/optimimizer the inline_size must be 
-set quite high, well 100 or above.
-I have noticed that guards are not always evaluated in constant propagtion
-purposes yielding less interesting results.
+set quite high, 100 or above.
+I have noticed that guards are not always evaluated for constant propagtion
+purposes in the compiler leading to less interesting results.
 
 When inlining modules the +native flag may lead to greate speed ups!
-
-
-
-
