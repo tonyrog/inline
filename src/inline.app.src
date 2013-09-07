@@ -1,0 +1,7 @@
+{application, inline,
+ [{description, "Module inline parse transform"},
+  {vsn, "1.0"},
+  {modules, [inline]},
+  {env, []},
+  {applications,[kernel,stdlib]}
+  ]}.
