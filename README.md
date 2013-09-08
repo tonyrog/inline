@@ -57,7 +57,7 @@ can verify this
 {function, run, 0, 2}.
   {label,1}.
     {line,[{location,"example.erl",14}]}.
-    {func_info,{atom,vec1},{atom,run},0}.
+    {func_info,{atom,example},{atom,run},0}.
   {label,2}.
     {move,{literal,{11.0,26.0,45.0}},{x,0}}.
     return.
