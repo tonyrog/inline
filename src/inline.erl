@@ -7,14 +7,16 @@
 
 -module(inline).
 
+-export([format_error/1]).
+-export([parse_transform/2]).
+
+%% debug & test
 -export([load_code/1]).
 -export([print_code/1, print_forms/1]).
 -export([localize_code/1, localize_code/2]).
 -export([localize_functions/2,localize_functions/3]).
 -export([localize_calls/2]).
 
--export([format_error/1]).
--export([parse_transform/2]).
 
 -record(mstate,
 	{
@@ -72,6 +74,10 @@ extract_inline([{attribute,_Ln,inline_module,M}|Fs],Forms,Inline) ->
        true ->
 	    extract_inline(Fs,Forms,Inline)
     end;
+%%extract_inline([{attribute,_Ln,{inline_module,{M,FAs}}}|Fs],Forms,Inline) when
+%%      is_atom(M), is_list(FAs) ->
+%%    FInlines = [{M,F,A} || {F,A} <- FAs],
+%%    extract_inline(Fs,Forms,[M|Inline],FInlines);
 extract_inline([F|Fs],Forms,Inline) ->
     extract_inline(Fs,[F|Forms],Inline);
 extract_inline([],Forms,Inline) ->
@@ -145,6 +151,11 @@ localize_functions(Mod,Pfx,[F|Fs],Acc,St) ->
 	    St1 = St#mstate { imports = St#mstate.imports++MFAs },
 	    localize_functions(Mod,Pfx,Fs,Acc,St1);
 
+	{attribute,Ln,compile,{inline,FAs}} when is_list(FAs) ->
+	    FAs1 = [{concat_atom([Pfx,Fn]),Arity} || {Fn,Arity} <- FAs],
+	    F1 = {attribute,Ln,compile,{inline,FAs1}},
+	    localize_functions(Mod,Pfx,Fs,[F1|Acc],St);
+
 	{attribute,_Ln,export_type,_Exports} -> %% no types are exported
 	    localize_functions(Mod,Pfx,Fs,Acc,St);
 
@@ -193,7 +204,8 @@ localize_body(Mod,Pfx,Body,St) ->
 		      {call,Ln1,{atom,Ln4,concat_atom([Pfx,F])},As};
 		 true -> A
 	      end;
-	 (expr,A={function,{atom,Ln1,M},{atom,_Ln2,F},{integer,_Ln3,Arity}})->
+	 (expr,A={'fun',Ln,{function,{atom,Ln1,M},{atom,_Ln2,F},
+			    {integer,_Ln3,Arity}}})->
 	      %% remote call to inline moduled? we may allow this if we export
 	      %% the function from the module that inline this function and
 	      %% the function was exported in the first place?
@@ -201,20 +213,21 @@ localize_body(Mod,Pfx,Body,St) ->
 	      if M =:= Mod ->
 		      io:format("Warning:~w: ~w:~w transform into local call\n",
 				[Ln1,M,F]),
-		      {function,concat_atom([Pfx,F]),Arity};
+		      {'fun',Ln,{function,concat_atom([Pfx,F]),Arity}};
 		 true ->
 		      A
 	      end;
-	 (expr,A={function,F,Arity}) ->
+	 (expr,A={'fun',Ln,{function,F,Arity}}) ->
 	      case lists:keyfind({F,Arity},1,St#mstate.imports) of
 		  false ->
 		      case erl_internal:bif(F,Arity) of
 			  true -> A;
-			  false -> {function,concat_atom([Pfx,F]),Arity}
+			  false -> 
+			      {'fun',Ln,{function,concat_atom([Pfx,F]),Arity}}
 		      end;
 		  {_,IM} ->
-		      Ln1 = 1,
-		      {function,{atom,Ln1,IM},{atom,Ln1,F},{integer,Ln1,Arity}}
+		      {'fun',Ln,{function,{atom,Ln,IM},{atom,Ln,F},
+				 {integer,Ln,Arity}}}
 	      end;
 	 (_W,Form) -> Form
       end, Body).
@@ -224,19 +237,19 @@ localize_body(Mod,Pfx,Body,St) ->
 localize_calls(MXs, Body) ->
     %% FIXME: handle imports!!!
     transform(
-      fun(expr,A={call,Ln1,{remote,_Ln2,{atom,_Ln3,Mod},{atom,Ln4,Fun}},As}) ->
-	      case lists:keyfind(Mod,1,MXs) of
-		  false -> A;
-		  {_,Pfx} ->
-		      {call,Ln1,{atom,Ln4, concat_atom([Pfx,Fun])},As}
-	      end;
-	 (expr,A={function,{atom,_Ln1,M},{atom,_Ln2,F},{integer,_Ln3,Arity}}) ->
+      fun(expr,X={call,L1,{remote,_L2,{atom,_L3,M},{atom,L4,F}},As}) ->
 	      case lists:keyfind(M,1,MXs) of
-		  false -> A;
+		  false -> X;
 		  {_,Pfx} ->
-		      {function,concat_atom([Pfx,F]),Arity}
+		      {call,L1,{atom,L4,concat_atom([Pfx,F])},As}
 	      end;
-	 (_W,Form) -> Form
+	 (expr,X={'fun',Ln,{function,{atom,_L1,M},{atom,_L2,F},
+			    {integer,_L3,A}}}) ->
+	      case lists:keyfind(M,1,MXs) of
+		  false -> X;
+		  {_,Pfx} -> {'fun',Ln,{function,concat_atom([Pfx,F]),A}}
+	      end;
+	 (_W,X) -> X
       end, Body).
     
 
@@ -246,26 +259,24 @@ transform(Fun,Form) ->
 tf_(Fun,W,Form) ->
     Form1 =
 	case Form of
-	    {T,Ln} -> 
-		{T,Ln};
-	    {'fun',Ln,{clauses,Cs}} ->
+	    {T,Ln} -> {T,Ln};
+	    {'fun',_Ln,{function,_F,_A}} -> Form;
+	    {'fun',_Ln,{function,_M,_F,_A}} -> Form;
+	    {'fun',Ln,{clauses,Cs}} -> 
 		{'fun',Ln,{clauses,tf_(Fun,clauses,Cs)}};
-	    {T,Ln,A1} ->
-		{T,Ln,tf_(Fun,W,A1)};
-	    {T,Ln,A1,A2} ->
-		{T,Ln,tf_(Fun,W,A1),tf_(Fun,W,A2)};
+	    {'named_fun',Ln,Name,Cs} ->
+		{'named_fun',Ln,Name,tf_(Fun,clauses,Cs)};
+	    {T,Ln,A1} -> {T,Ln,tf_(Fun,W,A1)};
+	    {T,Ln,A1,A2} -> {T,Ln,tf_(Fun,W,A1),tf_(Fun,W,A2)};
 	    {clause,Ln,A1,A2,A3} ->
-		{clause,Ln,
-		 tf_(Fun,head,A1),tf_(Fun,guard,A2),tf_(Fun,expr,A3)};
+		{clause,Ln,tf_(Fun,head,A1),tf_(Fun,guard,A2),tf_(Fun,expr,A3)};
 	    {T,Ln,A1,A2,A3} ->
 		{T,Ln,tf_(Fun,W,A1),tf_(Fun,W,A2),tf_(Fun,W,A3)};
 	    {'try',Ln,A1,A2,A3,A4} ->
 		{'try',Ln,tf_(Fun,expr,A1),tf_(Fun,clauses,A2),
 		 tf_(Fun,clauses,A3),tf_(Fun,expr,A4)};
-	    [H|T] ->
-		[tf_(Fun,W,H) | tf_(Fun,W,T)];
-	    [] ->
-		[];
+	    [H|T] -> [tf_(Fun,W,H) | tf_(Fun,W,T)];
+	    [] -> [];
 	    _ when is_number(Form) -> Form;
 	    _ when is_atom(Form) -> Form
 	end,
