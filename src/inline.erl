@@ -183,13 +183,14 @@ localize_functions(_Mod,_Pfx,[],Acc,St) ->
 %% localize the body of an inlined module function
 localize_body(Mod,Pfx,Body,St) ->
     transform(
-      fun(expr,A={call,Ln1,{atom,Ln2,F},As}) ->
+      fun(expr,A={call,_,{atom,_,record_info},[_,_]}) -> A;
+	 (expr,A={call,Ln1,{atom,Ln2,F},As}) ->
 	      Arity = length(As),
 	      case lists:keyfind({F,Arity},1,St#mstate.imports) of
 		  false ->
 		      case erl_internal:bif(F,Arity) of
 			  true -> A;
-			  false -> 
+			  false ->
 			      {call,Ln1,{atom,Ln2,concat_atom([Pfx,F])},As}
 		      end;
 		  {_,IM} ->
